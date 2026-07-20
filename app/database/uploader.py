@@ -1,5 +1,6 @@
 import re
 import pandas as pd
+from sqlalchemy import MetaData, Table
 from sqlalchemy.exc import SQLAlchemyError
 from app.database.db import get_direct_engine
 
@@ -73,3 +74,11 @@ def upload_dataset(file, filename: str, table_name: str, if_exists: str = "fail"
         "row_count": len(df),
         "columns": list(df.columns),
     }
+
+
+def delete_table(table_name: str) -> None:
+    """Drops the given table via the direct connection (reflected, not raw SQL)."""
+    engine = get_direct_engine()
+    metadata = MetaData()
+    table = Table(table_name, metadata, autoload_with=engine)
+    table.drop(engine)
