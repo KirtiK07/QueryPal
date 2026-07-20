@@ -38,7 +38,10 @@ function renderSchemaPanel() {
     return;
   }
   el.innerHTML = state.schema.map(t => `
-    <div class="schema-table-name">▸ ${escapeHtml(t.table)}</div>
+    <div class="d-flex justify-content-between align-items-center">
+      <div class="schema-table-name">▸ ${escapeHtml(t.table)}</div>
+      <button class="btn btn-sm btn-outline-danger delete-table-btn" data-table="${escapeHtml(t.table)}" title="Delete table">🗑</button>
+    </div>
     ${t.columns.map(c => `
       <div class="schema-col-row">
         <span class="schema-col-name">${escapeHtml(c.name)}
@@ -48,6 +51,28 @@ function renderSchemaPanel() {
         <span class="schema-col-type">${escapeHtml(c.type)}</span>
       </div>`).join("")}
   `).join("");
+
+  el.querySelectorAll(".delete-table-btn").forEach(btn => {
+    btn.addEventListener("click", () => deleteTable(btn.dataset.table));
+  });
+}
+
+async function deleteTable(tableName) {
+  if (!confirm(`Delete table '${tableName}'? This permanently removes it and all its data from Supabase.`)) {
+    return;
+  }
+  try {
+    const res = await fetch(`/tables/${encodeURIComponent(tableName)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Delete failed");
+
+    if (document.getElementById("table-select").value === tableName) {
+      document.getElementById("table-select").value = "";
+    }
+    await fetchSchema();
+  } catch (err) {
+    alert(`Failed to delete '${tableName}': ${err.message}`);
+  }
 }
 
 function renderTableOptions() {

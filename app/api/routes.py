@@ -5,7 +5,7 @@ from app.agent.sql_agent import generate_sql
 from app.agent.validator import validate_sql
 from app.database.db import get_engine
 from app.agent.chart_agent import decide_chart
-from app.database.uploader import upload_dataset
+from app.database.uploader import upload_dataset, delete_table
 
 router = APIRouter()
 
@@ -84,6 +84,21 @@ def upload(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload error: {str(e)}")
+
+
+@router.delete("/tables/{table_name}")
+def remove_table(table_name: str):
+    engine = get_engine()
+    known_tables = inspect(engine).get_table_names()
+    if table_name not in known_tables:
+        raise HTTPException(status_code=400, detail=f"Unknown table: {table_name}")
+
+    try:
+        delete_table(table_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete error: {str(e)}")
+
+    return {"deleted": table_name}
 
 
 @router.get("/schema")
