@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy import text, inspect
+from sqlalchemy.exc import ProgrammingError
 from app.agent.sql_agent import generate_sql
 from app.agent.validator import validate_sql
 from app.database.db import get_engine
@@ -12,6 +13,15 @@ router = APIRouter()
 class QueryRequest(BaseModel):
     question: str
     tables: list[str]
+
+
+def _run_sql(engine, sql: str):
+    with engine.connect() as conn:
+        result = conn.execute(text(sql))
+        columns = list(result.keys())
+        rows = [dict(zip(columns, row)) for row in result.fetchall()]
+    return columns, rows
+
 
 @router.post("/query")
 def query(request: QueryRequest):
@@ -29,9 +39,11 @@ def query(request: QueryRequest):
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown table(s): {', '.join(unknown)}")
 
+    question = request.question.strip()
+
     # Step 1 — Generate SQL
     try:
-        sql = generate_sql(request.question.strip(), tables)
+        sql = generate_sql(question, tables)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -45,12 +57,28 @@ def query(request: QueryRequest):
             "generated_sql": sql
         })
 
-    # Step 3 — Execute
+    # Step 3 — Execute, with one self-correction attempt on schema-mismatch
+    # errors (e.g. the LLM referencing a column that doesn't actually exist).
     try:
-        with engine.connect() as conn:
-            result = conn.execute(text(sql))
-            columns = list(result.keys())
-            rows = [dict(zip(columns, row)) for row in result.fetchall()]
+        columns, rows = _run_sql(engine, sql)
+    except ProgrammingError as e:
+        try:
+            retry_sql = generate_sql(question, tables, error_feedback=str(e.orig))
+            is_valid, reason = validate_sql(retry_sql)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail={
+                    "error": f"Unsafe query blocked: {reason}",
+                    "generated_sql": retry_sql
+                })
+            sql = retry_sql
+            columns, rows = _run_sql(engine, sql)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=500, detail={
+                "error": f"SQL execution error: {str(e)}",
+                "generated_sql": sql
+            })
     except Exception as e:
         raise HTTPException(status_code=500, detail={
             "error": f"SQL execution error: {str(e)}",

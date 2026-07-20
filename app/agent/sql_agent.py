@@ -35,9 +35,14 @@ Your job is to convert natural language business questions into precise, safe, a
 4. AGGREGATIONS
    - Use proper GROUP BY for totals, averages, counts, rankings.
    - Always ORDER BY when user implies ranking (top, most, least, highest).
-   - Use ROUND(value, 2) for monetary or percentage values.
+   - Use ROUND(value::numeric, 2) for monetary or percentage values — PostgreSQL
+     has no ROUND(double precision, integer) overload, only ROUND(numeric, integer),
+     so always cast to ::numeric first.
 
 5. AMBIGUITY
+   - Every column you reference MUST be spelled exactly as it appears in the
+     schema below. Never assume a generic column like "id", "created_at", or
+     "name" exists just because it's common — only use what is explicitly listed.
    - If a column or table doesn't exist in the schema, do not guess.
    - If unanswerable from the schema, return exactly:
      CANNOT_GENERATE: <one sentence reason>
@@ -49,18 +54,28 @@ Your job is to convert natural language business questions into precise, safe, a
    - "this year" → DATE_TRUNC('year', NOW())
 """
 
-def generate_sql(user_question: str, table_names: str | list[str]) -> str:
+def generate_sql(user_question: str, table_names: str | list[str], error_feedback: str | None = None) -> str:
     schema = load_schema(table_names)
 
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=f"""## Live Database Schema:
+    human_content = f"""## Live Database Schema:
 {schema}
 
 ## Business Question:
 {user_question}
+"""
+    if error_feedback:
+        human_content += f"""
+## Your Previous Query Failed With This Database Error:
+{error_feedback}
 
-Return ONLY the raw SQL query. No explanation. No markdown.""")
+Correct the query using ONLY the exact table and column names listed in the
+schema above. Do not invent any column that isn't shown there.
+"""
+    human_content += "\nReturn ONLY the raw SQL query. No explanation. No markdown."
+
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=human_content)
     ]
 
     response = llm.invoke(messages)
