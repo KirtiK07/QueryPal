@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QueryPal</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+</head>
+<body>
+
+<div class="container-fluid">
+  <div class="row">
+    <aside class="col-lg-3 sidebar">
+      <h2 class="mb-1">🔍 QueryPal</h2>
+      <p class="tagline">NATURAL LANGUAGE → SQL</p>
+      <hr>
+
+      <div class="section-label">Query History</div>
+      <div id="history-list" class="list-group list-group-flush mb-3"><p class="muted">No queries yet.</p></div>
+
+      <hr>
+
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="section-label mb-0">Database Schema</div>
+        <button id="refresh-schema-btn" class="btn btn-sm btn-outline-secondary" title="Refresh schema">↻</button>
+      </div>
+      <div id="schema-panel" class="schema-container mt-2"><p class="muted">Loading…</p></div>
+
+      <hr>
+      <p class="muted small">Connected to Supabase via SQLAlchemy</p>
+    </aside>
+
+    <main class="col-lg-9 main">
+      <h1>QueryPal</h1>
+      <p class="subtitle">Ask anything about your database in plain English.</p>
+      <hr>
+
+      <div class="card bg-body-tertiary mb-4">
+        <details class="upload-expander">
+          <summary class="card-body py-2">📤 Upload New Dataset (CSV / Excel)</summary>
+          <div class="card-body pt-0">
+            <input type="file" id="upload-file" class="form-control mb-2" accept=".csv,.xlsx,.xls">
+            <div class="row g-2">
+              <div class="col-md-6">
+                <input type="text" id="upload-table-name" class="form-control" placeholder="table_name">
+              </div>
+              <div class="col-md-3">
+                <select id="upload-mode" class="form-select">
+                  <option value="fail">Create new (fail if exists)</option>
+                  <option value="replace">Replace existing</option>
+                  <option value="append">Append rows</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <button id="upload-btn" class="btn btn-outline-primary w-100">Upload</button>
+              </div>
+            </div>
+            <div id="upload-status" class="mt-2"></div>
+          </div>
+        </details>
+      </div>
+
+      <div class="section-label">Table to Query</div>
+      <select id="table-select" class="form-select mb-3">
+        <option value="">Select a table…</option>
+      </select>
+
+      <textarea id="question-input" class="form-control" placeholder="e.g. Show me the top 5 products by revenue last quarter..." rows="4"></textarea>
+
+      <div class="d-flex gap-2 mt-3">
+        <button id="run-btn" class="btn btn-primary btn-gradient flex-grow-1">⚡ Run Query</button>
+        <button id="clear-btn" class="btn btn-outline-secondary">Clear</button>
+      </div>
+      <div id="warning" class="text-warning mt-2"></div>
+
+      <div id="results" class="results" style="display:none">
+        <hr>
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <div class="card metric-card"><div class="card-body">
+              <div class="metric-label">Rows Returned</div>
+              <div class="metric-value accent" id="metric-rows">0</div>
+            </div></div>
+          </div>
+          <div class="col-md-3">
+            <div class="card metric-card"><div class="card-body">
+              <div class="metric-label">Columns</div>
+              <div class="metric-value" id="metric-cols">0</div>
+            </div></div>
+          </div>
+          <div class="col-md-3">
+            <div class="card metric-card"><div class="card-body">
+              <div class="metric-label">Status</div>
+              <div class="metric-value status" id="metric-status">✓ Success</div>
+            </div></div>
+          </div>
+          <div class="col-md-3">
+            <div class="card metric-card"><div class="card-body">
+              <div class="metric-label">Time</div>
+              <div class="metric-value time" id="metric-time">—</div>
+            </div></div>
+          </div>
+        </div>
+
+        <div class="section-label">Generated SQL</div>
+        <pre class="sql-block" id="sql-block"></pre>
+
+        <ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><button class="nav-link tab-btn active" data-tab="table-tab">📋 Table</button></li>
+          <li class="nav-item"><button class="nav-link tab-btn" data-tab="chart-tab">📊 Chart</button></li>
+        </ul>
+        <div id="table-tab" class="tab-panel active">
+          <div id="results-table" class="table-responsive"></div>
+        </div>
+        <div id="chart-tab" class="tab-panel">
+          <div id="insight-box" class="alert alert-primary insight-box" style="display:none"></div>
+          <div id="chart-div"></div>
+        </div>
+      </div>
+
+      <div id="error-box" class="alert alert-danger mt-3" style="display:none"></div>
+    </main>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

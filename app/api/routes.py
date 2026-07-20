@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy import text, inspect
 from app.agent.sql_agent import generate_sql
 from app.agent.validator import validate_sql
 from app.database.db import get_engine
 from app.agent.chart_agent import decide_chart
+from app.database.uploader import upload_dataset
 
 router = APIRouter()
 
@@ -65,6 +66,24 @@ def query(request: QueryRequest):
         "row_count": len(rows),
         "chart": chart_config
     }
+
+
+@router.post("/upload")
+def upload(
+    file: UploadFile = File(...),
+    table_name: str = Form(...),
+    if_exists: str = Form("fail")
+):
+    if not table_name.strip():
+        raise HTTPException(status_code=400, detail="Table name cannot be empty.")
+
+    try:
+        result = upload_dataset(file.file, file.filename, table_name, if_exists)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload error: {str(e)}")
 
 
 @router.get("/schema")
