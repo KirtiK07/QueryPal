@@ -1,11 +1,14 @@
+import os
 import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+from app.database.uploader import upload_dataset, suggested_table_name
 
-API_URL = "http://localhost:8000/query"
-SCHEMA_URL = "http://localhost:8000/schema"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+API_URL = f"{API_BASE_URL}/query"
+SCHEMA_URL = f"{API_BASE_URL}/schema"
 
 st.set_page_config(
     page_title="QueryPal",
@@ -217,6 +220,8 @@ if "last_result" not in st.session_state:
     st.session_state.last_result = None
 if "question_input" not in st.session_state:
     st.session_state.question_input = ""
+if "table_input" not in st.session_state:
+    st.session_state.table_input = None
 if "schema_data" not in st.session_state:
     st.session_state.schema_data = None
 
@@ -279,6 +284,7 @@ with st.sidebar:
             label = item["question"][:40] + ("..." if len(item["question"]) > 40 else "")
             if st.button(f"↩ {label}", key=f"hist_{i}"):
                 st.session_state.question_input = item["question"]
+                st.session_state.table_input = item.get("table")
                 st.session_state.last_result = item
                 st.rerun()
 
@@ -315,6 +321,58 @@ st.markdown(
 )
 st.markdown("---")
 
+with st.expander("📤 Upload New Dataset (CSV / Excel)"):
+    uploaded_file = st.file_uploader(
+        "Choose a CSV or Excel file",
+        type=["csv", "xlsx", "xls"],
+        label_visibility="collapsed"
+    )
+    if uploaded_file is not None:
+        col_name, col_mode = st.columns([2, 1])
+        with col_name:
+            new_table_name = st.text_input(
+                "Table name",
+                value=suggested_table_name(uploaded_file.name)
+            )
+        with col_mode:
+            mode_label = st.selectbox(
+                "If table exists",
+                ["Create new (fail if exists)", "Replace existing", "Append rows"]
+            )
+        mode_map = {
+            "Create new (fail if exists)": "fail",
+            "Replace existing": "replace",
+            "Append rows": "append",
+        }
+        if st.button("Upload to Supabase"):
+            try:
+                with st.spinner("Creating table and loading data..."):
+                    upload_result = upload_dataset(
+                        uploaded_file, uploaded_file.name,
+                        new_table_name, mode_map[mode_label]
+                    )
+                st.success(
+                    f"Loaded {upload_result['row_count']} rows into "
+                    f"'{upload_result['table']}' ({len(upload_result['columns'])} columns)."
+                )
+                st.session_state.schema_data = fetch_schema()
+                st.session_state.table_input = upload_result["table"]
+                st.rerun()
+            except Exception as e:
+                st.error(f"Upload failed: {e}")
+
+st.markdown("<div class='section-label'>Table to Query</div>", unsafe_allow_html=True)
+table_options = [t["table"] for t in (st.session_state.schema_data or [])]
+default_table = st.session_state.table_input
+default_index = table_options.index(default_table) if default_table in table_options else None
+selected_table = st.selectbox(
+    label="Table to query",
+    options=table_options,
+    index=default_index,
+    placeholder="Select a table..." if table_options else "No tables found — import one in Supabase, then refresh",
+    label_visibility="collapsed"
+)
+
 question = st.text_area(
     label="Your question",
     placeholder="e.g. Show me the top 5 products by revenue last quarter...",
@@ -329,21 +387,23 @@ with col_btn:
 with col_clear:
     if st.button("Clear", use_container_width=True):
         st.session_state.question_input = ""
+        st.session_state.table_input = None
         st.session_state.last_result = None
         st.rerun()
 
 # ── Query execution ──────────────────────────────────────────────────
-if run_clicked and question.strip():
+if run_clicked and question.strip() and selected_table:
     with st.spinner("Thinking..."):
         try:
             response = requests.post(
                 API_URL,
-                json={"question": question.strip()},
+                json={"question": question.strip(), "table": selected_table},
                 timeout=30
             )
             if response.status_code == 200:
                 result = response.json()
                 result["question"] = question.strip()
+                result["table"] = selected_table
                 result["timestamp"] = datetime.now().strftime("%H:%M:%S")
                 st.session_state.last_result = result
                 st.session_state.history.append(result)
@@ -351,19 +411,21 @@ if run_clicked and question.strip():
                 error_detail = response.json().get("detail", "Unknown error")
                 st.session_state.last_result = {
                     "error": error_detail,
-                    "question": question
+                    "question": question,
+                    "table": selected_table
                 }
         except requests.exceptions.ConnectionError:
             st.session_state.last_result = {
                 "error": "Cannot connect to backend. Is FastAPI running on port 8000?",
-                "question": question
+                "question": question,
+                "table": selected_table
             }
         except Exception as e:
-            st.session_state.last_result = {"error": str(e), "question": question}
+            st.session_state.last_result = {"error": str(e), "question": question, "table": selected_table}
     st.rerun()
 
-elif run_clicked and not question.strip():
-    st.warning("Please type a question first.")
+elif run_clicked and (not question.strip() or not selected_table):
+    st.warning("Please select a table and type a question first.")
 
 # ── Results ──────────────────────────────────────────────────────────
 result = st.session_state.last_result
