@@ -62,10 +62,9 @@
         </details>
       </div>
 
-      <div class="section-label">Table to Query</div>
-      <select id="table-select" class="form-select mb-3">
-        <option value="">Select a table…</option>
-      </select>
+      <div class="section-label">Table(s) to Query</div>
+      <select id="table-select" class="form-select mb-1" multiple size="4"></select>
+      <p class="muted small mb-3">Hold Ctrl (Cmd on Mac) and click to select more than one table. Only select multiple tables that are actually related — the AI can't tell unrelated tables apart from related ones.</p>
 
       <textarea id="question-input" class="form-control" placeholder="e.g. Show me the top 5 products by revenue last quarter..." rows="4"></textarea>
 
