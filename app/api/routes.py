@@ -11,25 +11,27 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     question: str
-    table: str
+    tables: list[str]
 
 @router.post("/query")
 def query(request: QueryRequest):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
-    if not request.table.strip():
-        raise HTTPException(status_code=400, detail="Table cannot be empty.")
+    tables = [t.strip() for t in request.tables if t.strip()]
+    if not tables:
+        raise HTTPException(status_code=400, detail="At least one table must be selected.")
 
-    # Step 0 — Validate table exists
+    # Step 0 — Validate every requested table exists
     engine = get_engine()
     known_tables = inspect(engine).get_table_names()
-    if request.table not in known_tables:
-        raise HTTPException(status_code=400, detail=f"Unknown table: {request.table}")
+    unknown = [t for t in tables if t not in known_tables]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown table(s): {', '.join(unknown)}")
 
     # Step 1 — Generate SQL
     try:
-        sql = generate_sql(request.question.strip(), request.table)
+        sql = generate_sql(request.question.strip(), tables)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:

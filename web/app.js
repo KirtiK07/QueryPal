@@ -66,10 +66,9 @@ async function deleteTable(tableName) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Delete failed");
 
-    if (document.getElementById("table-select").value === tableName) {
-      document.getElementById("table-select").value = "";
-    }
+    const remaining = getSelectedTables().filter(t => t !== tableName);
     await fetchSchema();
+    setSelectedTables(remaining);
   } catch (err) {
     alert(`Failed to delete '${tableName}': ${err.message}`);
   }
@@ -77,10 +76,20 @@ async function deleteTable(tableName) {
 
 function renderTableOptions() {
   const sel = document.getElementById("table-select");
-  const current = sel.value;
-  sel.innerHTML = '<option value="">Select a table…</option>' +
-    state.schema.map(t => `<option value="${escapeHtml(t.table)}">${escapeHtml(t.table)}</option>`).join("");
-  if (state.schema.some(t => t.table === current)) sel.value = current;
+  const current = getSelectedTables();
+  sel.innerHTML = state.schema.map(t => `<option value="${escapeHtml(t.table)}">${escapeHtml(t.table)}</option>`).join("");
+  setSelectedTables(current.filter(t => state.schema.some(s => s.table === t)));
+}
+
+function getSelectedTables() {
+  return Array.from(document.getElementById("table-select").selectedOptions).map(o => o.value);
+}
+
+function setSelectedTables(tables) {
+  const sel = document.getElementById("table-select");
+  Array.from(sel.options).forEach(opt => {
+    opt.selected = tables.includes(opt.value);
+  });
 }
 
 function renderHistory() {
@@ -98,7 +107,7 @@ function renderHistory() {
     node.addEventListener("click", () => {
       const item = history[parseInt(node.dataset.idx, 10)];
       document.getElementById("question-input").value = item.question;
-      document.getElementById("table-select").value = item.table;
+      setSelectedTables(item.tables || []);
       if (item.result) {
         state.lastResult = item.result;
         renderResults(item.result);
@@ -150,7 +159,7 @@ document.getElementById("upload-btn").addEventListener("click", async () => {
     statusEl.className = "success";
     statusEl.textContent = `Loaded ${data.row_count} rows into '${data.table}' (${data.columns.length} columns).`;
     await fetchSchema();
-    document.getElementById("table-select").value = data.table;
+    setSelectedTables([data.table]);
   } catch (err) {
     statusEl.className = "error";
     statusEl.textContent = `Upload failed: ${err.message}`;
@@ -160,15 +169,15 @@ document.getElementById("upload-btn").addEventListener("click", async () => {
 // ── Query execution ──────────────────────────────────────────────────
 document.getElementById("run-btn").addEventListener("click", async () => {
   const question = document.getElementById("question-input").value.trim();
-  const table = document.getElementById("table-select").value;
+  const tables = getSelectedTables();
   const warningEl = document.getElementById("warning");
   const errorBox = document.getElementById("error-box");
 
   warningEl.textContent = "";
   errorBox.style.display = "none";
 
-  if (!question || !table) {
-    warningEl.textContent = "Please select a table and type a question first.";
+  if (!question || !tables.length) {
+    warningEl.textContent = "Please select at least one table and type a question first.";
     return;
   }
 
@@ -181,7 +190,7 @@ document.getElementById("run-btn").addEventListener("click", async () => {
     const res = await fetch("/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, table })
+      body: JSON.stringify({ question, tables })
     });
     const data = await res.json();
 
@@ -195,7 +204,7 @@ document.getElementById("run-btn").addEventListener("click", async () => {
     renderResults(data);
 
     const history = getHistory();
-    history.push({ question, table, result: data });
+    history.push({ question, tables, result: data });
     saveHistory(history);
     renderHistory();
   } catch (err) {
@@ -209,7 +218,7 @@ document.getElementById("run-btn").addEventListener("click", async () => {
 
 document.getElementById("clear-btn").addEventListener("click", () => {
   document.getElementById("question-input").value = "";
-  document.getElementById("table-select").value = "";
+  setSelectedTables([]);
   document.getElementById("results").style.display = "none";
   document.getElementById("error-box").style.display = "none";
   document.getElementById("warning").textContent = "";

@@ -1,12 +1,17 @@
 from sqlalchemy import inspect
 from app.database.db import get_engine
 
-def load_schema(table_name: str | None = None) -> str:
+def load_schema(table_name: str | list[str] | None = None) -> str:
     engine = get_engine()
     inspector = inspect(engine)
     schema_parts = []
 
-    table_names = [table_name] if table_name else inspector.get_table_names()
+    if table_name is None:
+        table_names = inspector.get_table_names()
+    elif isinstance(table_name, str):
+        table_names = [table_name]
+    else:
+        table_names = table_name
 
     for name in table_names:
         columns = inspector.get_columns(name)
