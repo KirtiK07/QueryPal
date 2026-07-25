@@ -692,8 +692,8 @@ if result:
                                     file_name=f"querypal_chart_{result.get('timestamp', 'export').replace(':', '-')}.png",
                                     mime="image/png",
                                 )
-                            except Exception:
-                                pass  # kaleido not available in this environment — chart still has Plotly's own camera-icon export
+                            except Exception as e:
+                                st.caption(f"PNG export unavailable in this environment ({e}). Use the camera icon in the chart's own toolbar instead.")
                     except Exception as e:
                         st.caption(f"Chart render error: {e}")
         else:
