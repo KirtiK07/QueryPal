@@ -340,6 +340,20 @@ st.session_state.setdefault("schema_data", None)
 if st.session_state.schema_data is None:
     st.session_state.schema_data = fetch_schema(user_schema)
 
+# Streamlit forbids writing to a widget's session_state key after that
+# widget has already been instantiated in the same script run. The
+# suggestion-chip and "Clear" buttons below sit after the text_area/
+# checkboxes they need to affect, so they stash their intent here instead
+# and this block applies it before those widgets are created on the next run.
+if st.session_state.pop("_clear_form", False):
+    st.session_state.question_input = ""
+    for _t in (st.session_state.schema_data or []):
+        st.session_state[f"tbl_{_t['table']}"] = False
+
+_pending_question = st.session_state.pop("_pending_question", None)
+if _pending_question is not None:
+    st.session_state.question_input = _pending_question
+
 
 # ── Delete confirmation (replaces the old browser confirm()) ──────────
 @st.dialog("Delete this dataset?")
@@ -531,15 +545,13 @@ if selected_tables:
         chip_cols = st.columns(len(chips))
         for i, chip in enumerate(chips):
             if chip_cols[i].button(chip, key=f"chip_{i}", type="secondary", use_container_width=True):
-                st.session_state.question_input = chip
+                st.session_state._pending_question = chip
                 st.rerun()
 
 col_run, col_clear = st.columns([5, 1])
 run_clicked = col_run.button("⚡ Get My Answer", use_container_width=True)
 if col_clear.button("Clear", use_container_width=True, type="secondary"):
-    st.session_state.question_input = ""
-    for t in (st.session_state.schema_data or []):
-        st.session_state[f"tbl_{t['table']}"] = False
+    st.session_state._clear_form = True
     st.session_state.last_result = None
     st.rerun()
 
