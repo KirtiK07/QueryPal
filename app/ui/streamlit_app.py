@@ -548,28 +548,40 @@ if result:
                     st.caption("No chart available for this result.")
                 else:
                     x_col, y_col, title = chart.get("x_col"), chart.get("y_col"), chart.get("title", "")
+                    z_col, color_col, size_col = chart.get("z_col"), chart.get("color_col"), chart.get("size_col")
                     plot_cfg = dict(color_discrete_sequence=["#4f8ef7", "#7c5cfc", "#38bdf8", "#4ade80", "#fb923c"], template="plotly_dark")
-                    layout_cfg = dict(
-                        paper_bgcolor="#0d0f12", plot_bgcolor="#151820", font_color="#cbd5e1",
+                    base_layout = dict(
+                        paper_bgcolor="#0d0f12", font_color="#cbd5e1",
                         font_family="Syne", title=dict(text=title, font=dict(size=18, color="#f1f5f9")),
                         margin=dict(l=20, r=20, t=50, b=20),
+                    )
+                    axis_layout = dict(
+                        plot_bgcolor="#151820",
                         xaxis=dict(gridcolor="#1e2330", linecolor="#1e2330"),
                         yaxis=dict(gridcolor="#1e2330", linecolor="#1e2330"),
                     )
+                    scene_layout = dict(scene=dict(
+                        bgcolor="#151820",
+                        xaxis=dict(gridcolor="#1e2330", title=x_col),
+                        yaxis=dict(gridcolor="#1e2330", title=y_col),
+                        zaxis=dict(gridcolor="#1e2330", title=z_col),
+                    ))
                     try:
                         fig = None
                         if chart_type == "bar":
-                            fig = px.bar(df, x=x_col, y=y_col, **plot_cfg)
+                            fig = px.bar(df, x=x_col, y=y_col, color=color_col, **plot_cfg)
                         elif chart_type == "line":
-                            fig = px.line(df, x=x_col, y=y_col, markers=True, **plot_cfg)
+                            fig = px.line(df, x=x_col, y=y_col, color=color_col, markers=True, **plot_cfg)
                         elif chart_type == "pie":
                             fig = px.pie(df, names=x_col, values=y_col, color_discrete_sequence=plot_cfg["color_discrete_sequence"])
                         elif chart_type == "scatter":
-                            fig = px.scatter(df, x=x_col, y=y_col, **plot_cfg)
+                            fig = px.scatter(df, x=x_col, y=y_col, color=color_col, size=size_col, **plot_cfg)
+                        elif chart_type == "scatter_3d":
+                            fig = px.scatter_3d(df, x=x_col, y=y_col, z=z_col, color=color_col, size=size_col, **plot_cfg)
                         elif chart_type == "histogram":
-                            fig = px.histogram(df, x=x_col, **plot_cfg)
+                            fig = px.histogram(df, x=x_col, color=color_col, **plot_cfg)
                         if fig:
-                            fig.update_layout(**layout_cfg)
+                            fig.update_layout(**base_layout, **(scene_layout if chart_type == "scatter_3d" else axis_layout))
                             st.plotly_chart(fig, use_container_width=True)
                     except Exception as e:
                         st.caption(f"Chart render error: {e}")
