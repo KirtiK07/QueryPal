@@ -33,9 +33,11 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.database.db import get_engine
 from app.database.uploader import upload_dataset, delete_table, suggested_table_name
+from app.database.query_history import save_query, get_history
 from app.agent.sql_agent import generate_sql
 from app.agent.validator import validate_sql
 from app.agent.chart_agent import decide_chart
+from app.auth import supabase_auth
 
 GITHUB_URL = "https://github.com/KirtiK07/QueryPal"
 
@@ -55,17 +57,17 @@ class QueryError(Exception):
         self.generated_sql = generated_sql
 
 
-def fetch_schema():
+def fetch_schema(schema):
     try:
         engine = get_engine()
         inspector = inspect(engine)
         schema_data = []
-        for table_name in inspector.get_table_names():
-            columns = inspector.get_columns(table_name)
-            pk_cols = inspector.get_pk_constraint(table_name).get("constrained_columns", [])
+        for table_name in inspector.get_table_names(schema=schema):
+            columns = inspector.get_columns(table_name, schema=schema)
+            pk_cols = inspector.get_pk_constraint(table_name, schema=schema).get("constrained_columns", [])
             fk_cols = {
                 col
-                for fk in inspector.get_foreign_keys(table_name)
+                for fk in inspector.get_foreign_keys(table_name, schema=schema)
                 for col in fk["constrained_columns"]
             }
             col_list = [
@@ -83,23 +85,27 @@ def fetch_schema():
         return []
 
 
-def _run_sql(engine, sql):
+def _run_sql(engine, sql, schema):
     with engine.connect() as conn:
+        # Generated SQL is unqualified ("SELECT * FROM my_table"), so point the
+        # connection's search_path at this user's schema rather than teaching
+        # sql_agent.py anything about per-user schemas.
+        conn.execute(text(f'SET search_path TO "{schema}", public'))
         result = conn.execute(text(sql))
         columns = list(result.keys())
         rows = [dict(zip(columns, row)) for row in result.fetchall()]
     return columns, rows
 
 
-def run_query(question, tables):
+def run_query(question, tables, schema):
     engine = get_engine()
-    known_tables = inspect(engine).get_table_names()
+    known_tables = inspect(engine).get_table_names(schema=schema)
     unknown = [t for t in tables if t not in known_tables]
     if unknown:
         raise QueryError(f"Unknown table(s): {', '.join(unknown)}")
 
     try:
-        sql = generate_sql(question, tables)
+        sql = generate_sql(question, tables, db_schema=schema)
     except ValueError as e:
         raise QueryError(str(e))
     except Exception as e:
@@ -110,15 +116,15 @@ def run_query(question, tables):
         raise QueryError(f"Unsafe query blocked: {reason}", generated_sql=sql)
 
     try:
-        columns, rows = _run_sql(engine, sql)
+        columns, rows = _run_sql(engine, sql, schema)
     except ProgrammingError as e:
         try:
-            retry_sql = generate_sql(question, tables, error_feedback=str(e.orig))
+            retry_sql = generate_sql(question, tables, error_feedback=str(e.orig), db_schema=schema)
             is_valid, reason = validate_sql(retry_sql)
             if not is_valid:
                 raise QueryError(f"Unsafe query blocked: {reason}", generated_sql=retry_sql)
             sql = retry_sql
-            columns, rows = _run_sql(engine, sql)
+            columns, rows = _run_sql(engine, sql, schema)
         except QueryError:
             raise
         except Exception:
@@ -271,14 +277,68 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ── Auth gate ────────────────────────────────────────────────────────
+# Every account gets its own Postgres schema; there is no admin role —
+# cross-account visibility, if ever needed, happens in the Supabase
+# dashboard directly rather than in-app.
+st.session_state.setdefault("auth_user", None)
+
+
+def render_auth_gate():
+    st.markdown("# 🔍 QueryPal")
+    st.markdown("<p class='hero-subtitle'>Ask your data questions in plain English. Log in or create an account to get started.</p>", unsafe_allow_html=True)
+
+    tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
+
+    with tab_login:
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in", use_container_width=True)
+        if submitted:
+            if not email.strip() or not password:
+                st.warning("Enter your email and password.")
+            else:
+                try:
+                    st.session_state.auth_user = supabase_auth.sign_in(email.strip(), password)
+                    st.rerun()
+                except supabase_auth.AuthError as e:
+                    st.error(str(e))
+
+    with tab_signup:
+        with st.form("signup_form"):
+            email = st.text_input("Email", key="signup_email")
+            password = st.text_input("Password (min 6 characters)", type="password", key="signup_password")
+            submitted = st.form_submit_button("Create account", use_container_width=True)
+        if submitted:
+            if not email.strip() or len(password) < 6:
+                st.warning("Enter a valid email and a password of at least 6 characters.")
+            else:
+                try:
+                    result = supabase_auth.sign_up(email.strip(), password)
+                    if result.get("email_confirmation_pending"):
+                        st.success("Account created — check your email to confirm it, then log in above.")
+                    else:
+                        st.session_state.auth_user = result
+                        st.rerun()
+                except supabase_auth.AuthError as e:
+                    st.error(str(e))
+
+
+if st.session_state.auth_user is None:
+    render_auth_gate()
+    st.stop()
+
+auth_user = st.session_state.auth_user
+user_schema = auth_user["schema_name"]
+
 # ── Session state ────────────────────────────────────────────────────
-st.session_state.setdefault("history", [])
 st.session_state.setdefault("last_result", None)
 st.session_state.setdefault("question_input", "")
 st.session_state.setdefault("schema_data", None)
 
 if st.session_state.schema_data is None:
-    st.session_state.schema_data = fetch_schema()
+    st.session_state.schema_data = fetch_schema(user_schema)
 
 
 # ── Delete confirmation (replaces the old browser confirm()) ──────────
@@ -290,8 +350,8 @@ def confirm_delete_dialog(table_name):
         st.rerun()
     if c2.button("Delete permanently", use_container_width=True, type="primary"):
         try:
-            delete_table(table_name)
-            st.session_state.schema_data = fetch_schema()
+            delete_table(table_name, schema=user_schema)
+            st.session_state.schema_data = fetch_schema(user_schema)
             st.success(f"'{table_name}' deleted.")
         except Exception as e:
             st.error(friendly_error(str(e))[0])
@@ -315,17 +375,26 @@ with st.sidebar:
     st.markdown("<p style='color:#4f8ef7;font-size:13px;letter-spacing:0.08em'>NATURAL LANGUAGE → SQL</p>", unsafe_allow_html=True)
     st.markdown("---")
 
+    st.markdown(f"<p style='font-size:13px'>👤 {auth_user['email']}</p>", unsafe_allow_html=True)
+    if st.button("Log out", use_container_width=True, type="secondary"):
+        supabase_auth.sign_out()
+        for key in ("auth_user", "last_result", "question_input", "schema_data"):
+            st.session_state.pop(key, None)
+        st.rerun()
+
+    st.markdown("---")
+
     st.markdown("<div class='section-label'>Query History</div>", unsafe_allow_html=True)
-    if not st.session_state.history:
+    history = get_history(auth_user["id"])
+    if not history:
         st.markdown("<p style='color:#475569;font-size:14px'>No queries yet.</p>", unsafe_allow_html=True)
     else:
-        for i, item in enumerate(reversed(st.session_state.history[-10:])):
+        for i, item in enumerate(history):
             label = item["question"][:40] + ("…" if len(item["question"]) > 40 else "")
             if st.button(f"↩ {label}", key=f"hist_{i}", use_container_width=True, type="secondary"):
                 st.session_state.question_input = item["question"]
-                for t in item.get("tables", []):
+                for t in (item.get("tables") or []):
                     st.session_state[f"tbl_{t}"] = True
-                st.session_state.last_result = item
                 st.rerun()
 
     st.markdown("---")
@@ -333,7 +402,7 @@ with st.sidebar:
     col_lbl, col_refresh = st.columns([3, 1])
     col_lbl.markdown("<div class='section-label'>Your Tables</div>", unsafe_allow_html=True)
     if col_refresh.button("↻", key="refresh_schema", help="Refresh"):
-        st.session_state.schema_data = fetch_schema()
+        st.session_state.schema_data = fetch_schema(user_schema)
         st.rerun()
     st.caption("Think of each table like a tab in a spreadsheet.")
 
@@ -358,7 +427,7 @@ with st.sidebar:
                 </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("<p style='color:#334155;font-size:12px'>🔒 Read-only — QueryPal can look up and summarize your data, but it can never change or delete it through a question.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#334155;font-size:12px'>🔒 Read-only — QueryPal can look up and summarize your data, but it can never change or delete it through a question. Your tables are private to your account.</p>", unsafe_allow_html=True)
 
 
 # ── Top bar ──────────────────────────────────────────────────────────
@@ -419,9 +488,9 @@ with st.expander("📤 Step 1 — Upload a dataset (CSV or Excel)", expanded=not
         if st.button("Upload"):
             try:
                 with st.spinner("Creating table and loading data…"):
-                    result = upload_dataset(uploaded_file, uploaded_file.name, new_table_name, mode_map[mode_label])
+                    result = upload_dataset(uploaded_file, uploaded_file.name, new_table_name, mode_map[mode_label], schema=user_schema)
                 st.success(f"Loaded {result['row_count']} rows into '{result['table']}' ({len(result['columns'])} columns). You're ready for Step 2 below.")
-                st.session_state.schema_data = fetch_schema()
+                st.session_state.schema_data = fetch_schema(user_schema)
                 st.session_state[f"tbl_{result['table']}"] = True
                 st.rerun()
             except Exception as e:
@@ -481,12 +550,15 @@ if run_clicked:
     else:
         with st.spinner("🤔 Thinking…"):
             try:
-                result = run_query(question.strip(), selected_tables)
+                result = run_query(question.strip(), selected_tables, user_schema)
                 result["question"] = question.strip()
                 result["tables"] = selected_tables
                 result["timestamp"] = datetime.now().strftime("%H:%M:%S")
                 st.session_state.last_result = result
-                st.session_state.history.append(result)
+                save_query(
+                    auth_user["id"], question.strip(), result.get("generated_sql"),
+                    selected_tables, result.get("row_count"), result.get("chart", {}).get("chart_type"),
+                )
             except QueryError as e:
                 friendly, raw = friendly_error(str(e))
                 st.session_state.last_result = {

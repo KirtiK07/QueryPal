@@ -1,23 +1,23 @@
 from sqlalchemy import inspect
 from app.database.db import get_engine
 
-def load_schema(table_name: str | list[str] | None = None) -> str:
+def load_schema(table_name: str | list[str] | None = None, schema: str = "public") -> str:
     engine = get_engine()
     inspector = inspect(engine)
     schema_parts = []
 
     if table_name is None:
-        table_names = inspector.get_table_names()
+        table_names = inspector.get_table_names(schema=schema)
     elif isinstance(table_name, str):
         table_names = [table_name]
     else:
         table_names = table_name
 
     for name in table_names:
-        columns = inspector.get_columns(name)
+        columns = inspector.get_columns(name, schema=schema)
         col_defs = [f"  {col['name']} ({col['type']})" for col in columns]
 
-        fks = inspector.get_foreign_keys(name)
+        fks = inspector.get_foreign_keys(name, schema=schema)
         fk_lines = [
             f"  -- FK: {fk['constrained_columns']} → "
             f"{fk['referred_table']}({fk['referred_columns']})"

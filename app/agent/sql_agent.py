@@ -54,8 +54,8 @@ Your job is to convert natural language business questions into precise, safe, a
    - "this year" → DATE_TRUNC('year', NOW())
 """
 
-def generate_sql(user_question: str, table_names: str | list[str], error_feedback: str | None = None) -> str:
-    schema = load_schema(table_names)
+def generate_sql(user_question: str, table_names: str | list[str], error_feedback: str | None = None, db_schema: str = "public") -> str:
+    schema = load_schema(table_names, schema=db_schema)
 
     human_content = f"""## Live Database Schema:
 {schema}

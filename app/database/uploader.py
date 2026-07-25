@@ -48,11 +48,12 @@ def read_dataset(file, filename: str) -> pd.DataFrame:
     return df
 
 
-def upload_dataset(file, filename: str, table_name: str, if_exists: str = "fail") -> dict:
+def upload_dataset(file, filename: str, table_name: str, if_exists: str = "fail", schema: str = "public") -> dict:
     """
     Reads the uploaded file and writes it to Supabase via the direct connection,
     issuing CREATE TABLE (if needed) + INSERT through SQLAlchemy's to_sql().
     if_exists: "fail" | "replace" | "append" (same semantics as pandas.DataFrame.to_sql)
+    schema: which Postgres schema the table lives in — each user gets their own.
     """
     if if_exists not in ("fail", "replace", "append"):
         raise ValueError(f"Invalid if_exists mode: {if_exists}")
@@ -65,7 +66,7 @@ def upload_dataset(file, filename: str, table_name: str, if_exists: str = "fail"
 
     engine = get_direct_engine()
     try:
-        df.to_sql(table_name, engine, if_exists=if_exists, index=False)
+        df.to_sql(table_name, engine, schema=schema, if_exists=if_exists, index=False)
     except SQLAlchemyError as e:
         raise ValueError(f"Failed to create/insert into '{table_name}': {e}")
 
@@ -76,9 +77,9 @@ def upload_dataset(file, filename: str, table_name: str, if_exists: str = "fail"
     }
 
 
-def delete_table(table_name: str) -> None:
+def delete_table(table_name: str, schema: str = "public") -> None:
     """Drops the given table via the direct connection (reflected, not raw SQL)."""
     engine = get_direct_engine()
     metadata = MetaData()
-    table = Table(table_name, metadata, autoload_with=engine)
+    table = Table(table_name, metadata, schema=schema, autoload_with=engine)
     table.drop(engine)
