@@ -685,6 +685,15 @@ if result:
                         if fig:
                             fig.update_layout(**base_layout, **(scene_layout if chart_type == "scatter_3d" else axis_layout))
                             st.plotly_chart(fig, use_container_width=True)
+                            try:
+                                st.download_button(
+                                    "⬇ Download chart as PNG",
+                                    data=fig.to_image(format="png", width=1200, height=700, scale=2),
+                                    file_name=f"querypal_chart_{result.get('timestamp', 'export').replace(':', '-')}.png",
+                                    mime="image/png",
+                                )
+                            except Exception:
+                                pass  # kaleido not available in this environment — chart still has Plotly's own camera-icon export
                     except Exception as e:
                         st.caption(f"Chart render error: {e}")
         else:
