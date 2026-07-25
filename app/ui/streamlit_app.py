@@ -33,13 +33,14 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.database.db import get_engine
 from app.database.uploader import upload_dataset, delete_table, suggested_table_name
-from app.database.query_history import save_query, get_history
+from app.database.query_history import save_query, get_history, count_recent_queries
 from app.agent.sql_agent import generate_sql
 from app.agent.validator import validate_sql
 from app.agent.chart_agent import decide_chart
 from app.auth import supabase_auth
 
 GITHUB_URL = "https://github.com/KirtiK07/QueryPal"
+DAILY_QUERY_LIMIT = 20  # per user, rolling 24h — protects the shared Groq API quota
 
 st.set_page_config(
     page_title="QueryPal — Ask Your Data Questions in Plain English",
@@ -548,12 +549,20 @@ if selected_tables:
                 st.session_state._pending_question = chip
                 st.rerun()
 
+queries_today = count_recent_queries(auth_user["id"])
+queries_remaining = max(0, DAILY_QUERY_LIMIT - queries_today)
+
 col_run, col_clear = st.columns([5, 1])
-run_clicked = col_run.button("⚡ Get My Answer", use_container_width=True)
+run_clicked = col_run.button("⚡ Get My Answer", use_container_width=True, disabled=queries_remaining == 0)
 if col_clear.button("Clear", use_container_width=True, type="secondary"):
     st.session_state._clear_form = True
     st.session_state.last_result = None
     st.rerun()
+
+if queries_remaining == 0:
+    st.warning(f"You've reached today's limit of {DAILY_QUERY_LIMIT} questions. Please come back in a few hours — the limit rolls off 24 hours after each question.")
+elif queries_remaining <= 5:
+    st.caption(f"{queries_remaining} question{'s' if queries_remaining != 1 else ''} left today.")
 
 # ── Query execution ──────────────────────────────────────────────────
 if run_clicked:
@@ -622,10 +631,19 @@ if result:
 
         df = pd.DataFrame(result.get("rows", []), columns=result.get("columns", []))
 
+        if len(df) == 100:
+            st.caption("⚠ Showing the first 100 rows — there may be more. Try narrowing your question (e.g. add a filter or date range) to see a different slice.")
+
         if not df.empty:
             tab1, tab2 = st.tabs(["📋  Table", "📊  Chart"])
             with tab1:
                 st.dataframe(df, use_container_width=True, height=400)
+                st.download_button(
+                    "⬇ Download as CSV",
+                    data=df.to_csv(index=False).encode("utf-8"),
+                    file_name=f"querypal_results_{result.get('timestamp', 'export').replace(':', '-')}.csv",
+                    mime="text/csv",
+                )
             with tab2:
                 chart_type = chart.get("chart_type", "none")
                 if chart_type == "none":
